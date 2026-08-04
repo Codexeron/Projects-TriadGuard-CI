@@ -1,0 +1,5 @@
+mimar_kurallari:
+  max_complexity: 10
+  ignore_security_rules:
+    - "CVE-2023-1234" # Bilinen bir false-positive ise burada pas geç
+  strict_mode: true # Kritik bulguda PR'ı otomatik kapat
