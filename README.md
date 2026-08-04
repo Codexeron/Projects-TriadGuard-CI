@@ -39,5 +39,5 @@ Integrate this project into your own repository in just **2 minutes**:
 
 ### 1️⃣ Clone the Repository
 ```bash
-git clone https://github.com/[YourUsername]/Projects-TriadGuard-CI.git
+git clone https://github.com/Codexeron/Projects-TriadGuard-CI.git
 cd Projects-TriadGuard-CI
