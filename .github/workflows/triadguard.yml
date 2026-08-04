@@ -1,11 +1,8 @@
-name: TriadGuard-CI Autonomous Review
+name: TriadGuard-CI Orchestrator
 
 on:
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -14,113 +11,73 @@ permissions:
   security-events: write
 
 jobs:
-  triad-guardian:
-    name: TriadGuard Autonomous Review
+  # 1. Structuralist - Kod Kalitesi (SonarCloud)
+  structuralist:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pygithub pyyaml requests
-
-      #################################################
-      # SonarCloud (optional)
-      #################################################
-
+      - uses: actions/checkout@v4
       - name: SonarCloud Scan
-        if: ${{ secrets.SONAR_TOKEN != '' }}
-        uses: SonarSource/sonarcloud-github-action@v2.3.0
+        uses: SonarSource/sonarcloud-github-action@v2.2.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          args: >
-            -Dsonar.qualitygate.wait=true
         continue-on-error: true
 
-      #################################################
-      # Trivy
-      #################################################
-
+  # 2. Sentinel - Güvenlik (Trivy)
+  sentinel-trivy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Trivy Filesystem Scan
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@0.19.0
         with:
-          scan-type: fs
-          scan-ref: .
-          format: sarif
-          output: trivy-results.sarif
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
         continue-on-error: true
-
       - name: Upload Trivy SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: trivy-results.sarif
+          name: trivy-sarif
+          path: trivy-results.sarif
 
-      #################################################
-      # CodeQL
-      #################################################
-
+  # 3. Sentinel - Derin Analiz (CodeQL)
+  sentinel-codeql:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: |
-            python
-            javascript
-            csharp
-        continue-on-error: true
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-        continue-on-error: true
-
-      - name: Analyze
+          languages: python, javascript, csharp
+      - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         continue-on-error: true
+      - name: Upload CodeQL SARIF
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif
+          path: results/*.sarif
 
-      #################################################
-      # Conductor
-      #################################################
-
+  # 4. Conductor - Karar Motoru (Tüm raporları toplar)
+  conductor:
+    needs: [structuralist, sentinel-trivy, sentinel-codeql]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Dependencies
+        run: pip install pygithub pyyaml requests
+      - name: Download All SARIF Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./reports
       - name: Run Conductor
-        if: hashFiles('scripts/conductor.py') != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO_NAME: ${{ github.repository }}
-        run: |
-          python scripts/conductor.py
-
-      #################################################
-      # Final Comment
-      #################################################
-
-      - name: Publish Report
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const ok = "${{ job.status }}" === "success";
-
-            const body = ok
-              ? "🏛️ **TriadGuard Architect Report**\n\n✅ All automated checks completed successfully."
-              : "🏛️ **TriadGuard Architect Report**\n\n⚠️ One or more checks reported warnings or errors. Please review the workflow logs.";
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body
-            });
+        run: python scripts/conductor.py
