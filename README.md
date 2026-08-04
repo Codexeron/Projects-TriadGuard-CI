@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Architecture-TriadGuard--CI-blueviolet?style=for-the-badge&logo=githubactions" alt="Architecture"/>
-  <img src="https://img.shields.io/badge/Status-Stable-brightgreen?style=for-the-badge" alt="Status"/>
+  <img src="https://img.shields.io/badge/Status-Testing-brightgreen?style=for-the-badge" alt="Status"/>
   <img src="https://img.shields.io/badge/API_Dependency-None-red?style=for-the-badge&logo=shield" alt="API Free"/>
   <img src="https://img.shields.io/badge/PR_Review-Autonomous-181717?style=for-the-badge&logo=github" alt="PR Autonomous"/>
 </p>
