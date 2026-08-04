@@ -1,6 +1,8 @@
 name: TriadGuard-CI Orchestrator
 
 on:
+  push:
+    branches: [ "main" ]
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -30,7 +32,6 @@ jobs:
       - name: Install Conductor dependencies
         run: pip install pygithub pyyaml requests
 
-      # ===== SENTINEL - Trivy (Güvenlik Taraması) =====
       - name: Trivy Filesystem Scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -45,7 +46,6 @@ jobs:
         with:
           sarif_file: reports/trivy-results.sarif
 
-      # ===== SENTINEL - CodeQL (Derinlemesine Analiz) =====
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
@@ -63,7 +63,7 @@ jobs:
           output: reports/codeql-results.sarif
         continue-on-error: true
 
-      # ===== STRUCTURALIST - SonarCloud (Opsiyonel, Secret yoksa pasif) =====
+      # SonarCloud is optional – uncomment if you have SONAR_TOKEN secret
       # - name: SonarCloud Scan
       #   uses: SonarSource/sonarcloud-github-action@v2.2.0
       #   env:
@@ -73,7 +73,6 @@ jobs:
       #     args: -Dsonar.qualitygate.wait=false
       #   continue-on-error: true
 
-      # ===== CONDUCTOR - Karar Motoru =====
       - name: Run Conductor (Decision Engine)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
