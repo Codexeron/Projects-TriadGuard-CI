@@ -7,25 +7,29 @@ from github import Github
 from github.GithubException import GithubException
 
 def load_config():
-    """Load configuration from config/triadguard.yml"""
-    config_path = "config/triadguard.yml"
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f)
-        except Exception as e:
-            print(f"[WARNING] Config load error: {e}")
-    return {"rules": {"strict_mode": False, "max_warnings": 10, "excluded_paths": []}}
+    """Load user configuration from config/triadguard.yml"""
+    config_paths = ["config/triadguard.yml", ".triadguard/config.yaml", "triadguard.yaml"]
+    for path in config_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    config = yaml.safe_load(f)
+                    print(f"[CONFIG] Loaded from {path}")
+                    return config
+            except Exception as e:
+                print(f"[WARNING] Could not parse {path}: {e}")
+    print("[CONFIG] No config found. Using defaults.")
+    return {"architect_rules": {"strict_mode": False, "excluded_paths": []}}
 
 def parse_sarif(file_path):
-    """Extract error/warning counts from a SARIF file"""
+    """Parse SARIF file and return error/warning counts."""
+    errors = 0
+    warnings = 0
     if not os.path.exists(file_path):
-        return {"errors": 0, "warnings": 0, "found": False}
+        return {"errors": 0, "warnings": 0, "file_found": False}
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        errors = 0
-        warnings = 0
         for run in data.get('runs', []):
             for result in run.get('results', []):
                 level = result.get('level', 'warning')
@@ -33,94 +37,95 @@ def parse_sarif(file_path):
                     errors += 1
                 elif level in ['warning', 'note']:
                     warnings += 1
-        return {"errors": errors, "warnings": warnings, "found": True}
+        return {"errors": errors, "warnings": warnings, "file_found": True}
     except Exception as e:
-        print(f"[ERROR] SARIF parse failed: {e}")
-        return {"errors": 0, "warnings": 0, "found": False}
+        print(f"[ERROR] Failed to parse SARIF {file_path}: {e}")
+        return {"errors": 0, "warnings": 0, "file_found": False}
 
-def set_commit_status(repo, pr, state, description):
-    """Set commit status on PR's head commit"""
+def is_excluded(file_path, excluded_patterns):
+    if not excluded_patterns:
+        return False
+    import fnmatch
+    for pattern in excluded_patterns:
+        if fnmatch.fnmatch(file_path, pattern):
+            return True
+    return False
+
+def set_commit_status(repo, pr, state, description, context="TriadGuard-CI"):
     try:
         commit = repo.get_commit(pr.head.sha)
         commit.create_status(
             state=state,
             description=description[:100],
-            context="TriadGuard-CI/Conductor"
+            context=context
         )
-        print(f"[STATUS] Set status to '{state}'")
+        print(f"[STATUS] Set status to '{state}' on commit {pr.head.sha[:7]}")
     except GithubException as e:
-        print(f"[ERROR] Status update failed: {e}")
+        print(f"[ERROR] Could not set commit status: {e}")
 
 def main():
     token = os.getenv("GITHUB_TOKEN")
     repo_name = os.getenv("REPO_NAME")
     pr_number = os.getenv("PR_NUMBER")
+    
     if not token or not repo_name or not pr_number:
-        print("[ERROR] Missing env variables")
+        print("[ERROR] Missing environment variables.")
         sys.exit(1)
-
+    
     pr_number = int(pr_number)
     g = Github(token)
     repo = g.get_repo(repo_name)
     pr = repo.get_pull(pr_number)
-
-    # 1. Load config
+    
+    # 1. Load Config
     config = load_config()
-    rules = config.get("rules", {})
+    rules = config.get("architect_rules", {})
     strict_mode = rules.get("strict_mode", False)
-    max_warnings = rules.get("max_warnings", 10)
-    excluded = rules.get("excluded_paths", [])
-
-    # 2. Collect all SARIF files from downloaded artifacts
-    sarif_files = glob.glob("./reports/**/*.sarif", recursive=True)
-    if not sarif_files:
-        pr.create_issue_comment(
-            "🏛️ **TriadGuard Architect Report**\n\n"
-            "ℹ️ **Verdict: MANUAL REVIEW REQUIRED**\n"
-            "No SARIF reports found. This may be the first run or no issues detected.\n"
-            "Please review manually."
-        )
-        set_commit_status(repo, pr, "success", "No issues found")
-        return
-
+    excluded_paths = rules.get("excluded_paths", [])
+    
+    # 2. Find SARIF files (Artık reports/ klasörüne bakıyor)
+    sarif_files = glob.glob("reports/**/*.sarif", recursive=True) + glob.glob("*.sarif")
+    sarif_files = list(set(sarif_files))  # Benzersiz yap
+    print(f"[INFO] Found {len(sarif_files)} SARIF file(s): {sarif_files}")
+    
+    # 3. Filtrele ve Say
     total_errors = 0
     total_warnings = 0
-    for f in sarif_files:
-        # Skip excluded paths
-        if any(glob.fnmatch.fnmatch(f, p) for p in excluded):
+    for file in sarif_files:
+        if is_excluded(file, excluded_paths):
+            print(f"[SKIP] Excluded: {file}")
             continue
-        result = parse_sarif(f)
-        if result["found"]:
+        result = parse_sarif(file)
+        if result["file_found"]:
             total_errors += result["errors"]
             total_warnings += result["warnings"]
-            print(f"  {f}: errors={result['errors']}, warnings={result['warnings']}")
-
-    print(f"SUMMARY: errors={total_errors}, warnings={total_warnings}")
-
-    # 3. Decision
-    comment = "🏛️ **TriadGuard Architect Report**\n\n"
-    comment += f"📊 **Aggregate Scan:**\n- **Errors:** {total_errors}\n- **Warnings:** {total_warnings}\n\n"
-
+            print(f"    -> {file}: Errors={result['errors']}, Warnings={result['warnings']}")
+    
+    print(f"[SUMMARY] Total Errors: {total_errors}, Total Warnings: {total_warnings}")
+    
+    # 4. Karar ve Yorum
+    comment_body = "🏛️ **TriadGuard Architect Report**\n\n"
+    comment_body += f"📊 **Scan Summary:**\n- **Critical Errors:** {total_errors}\n- **Warnings:** {total_warnings}\n\n"
+    
     if total_errors > 0:
-        comment += "🚫 **Verdict: REJECTED**\nCritical errors found."
-        pr.create_issue_comment(comment)
+        comment_body += "🚫 **Verdict: REJECTED**\nCritical errors detected. Please fix them."
+        pr.create_issue_comment(comment_body)
         set_commit_status(repo, pr, "failure", "Rejected: Critical errors")
     elif strict_mode and total_warnings > 0:
-        comment += "🚫 **Verdict: REJECTED (Strict Mode)**\nWarnings are blocked by strict mode."
-        pr.create_issue_comment(comment)
-        set_commit_status(repo, pr, "failure", "Strict mode: warnings blocked")
-    elif total_warnings > max_warnings:
-        comment += "⚠️ **Verdict: CHANGES REQUESTED**\n"
-        comment += f"Warnings ({total_warnings}) exceed threshold ({max_warnings})."
-        pr.create_issue_comment(comment)
-        set_commit_status(repo, pr, "failure", "Changes requested: high warnings")
+        comment_body += "🚫 **Verdict: REJECTED (Strict Mode)**\nWarnings are blocked by config."
+        pr.create_issue_comment(comment_body)
+        set_commit_status(repo, pr, "failure", "Strict mode: Warnings blocked")
+    elif total_warnings > 10:
+        comment_body += "⚠️ **Verdict: CHANGES REQUESTED**\nToo many warnings."
+        pr.create_issue_comment(comment_body)
+        set_commit_status(repo, pr, "failure", "Changes requested")
     elif total_warnings > 0:
-        comment += "✅ **Verdict: APPROVED WITH NOTES**\nMinor warnings present. Merge allowed."
-        pr.create_issue_comment(comment)
+        comment_body += "✅ **Verdict: APPROVED WITH NOTES**\nMinor warnings present."
+        pr.create_issue_comment(comment_body)
         set_commit_status(repo, pr, "success", "Approved with notes")
     else:
-        comment += "✅ **Verdict: APPROVED**\nAll checks passed."
-        pr.create_issue_comment(comment)
+        comment_body += "✅ **Verdict: APPROVED**\nAll checks passed cleanly."
+        pr.create_issue_comment(comment_body)
         set_commit_status(repo, pr, "success", "All checks passed")
 
 if __name__ == "__main__":
