@@ -7,7 +7,6 @@ from github import Github
 from github.GithubException import GithubException
 
 def load_config():
-    """Load user configuration from config/triadguard.yml"""
     config_paths = ["config/triadguard.yml", ".triadguard/config.yaml", "triadguard.yaml"]
     for path in config_paths:
         if os.path.exists(path):
@@ -22,7 +21,6 @@ def load_config():
     return {"architect_rules": {"strict_mode": False, "excluded_paths": []}}
 
 def parse_sarif(file_path):
-    """Parse SARIF file and return error/warning counts."""
     errors = 0
     warnings = 0
     if not os.path.exists(file_path):
@@ -77,18 +75,15 @@ def main():
     repo = g.get_repo(repo_name)
     pr = repo.get_pull(pr_number)
     
-    # 1. Load Config
     config = load_config()
     rules = config.get("architect_rules", {})
     strict_mode = rules.get("strict_mode", False)
     excluded_paths = rules.get("excluded_paths", [])
     
-    # 2. Find SARIF files (Artık reports/ klasörüne bakıyor)
     sarif_files = glob.glob("reports/**/*.sarif", recursive=True) + glob.glob("*.sarif")
-    sarif_files = list(set(sarif_files))  # Benzersiz yap
+    sarif_files = list(set(sarif_files))
     print(f"[INFO] Found {len(sarif_files)} SARIF file(s): {sarif_files}")
     
-    # 3. Filtrele ve Say
     total_errors = 0
     total_warnings = 0
     for file in sarif_files:
@@ -103,7 +98,6 @@ def main():
     
     print(f"[SUMMARY] Total Errors: {total_errors}, Total Warnings: {total_warnings}")
     
-    # 4. Karar ve Yorum
     comment_body = "🏛️ **TriadGuard Architect Report**\n\n"
     comment_body += f"📊 **Scan Summary:**\n- **Critical Errors:** {total_errors}\n- **Warnings:** {total_warnings}\n\n"
     
