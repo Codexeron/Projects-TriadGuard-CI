@@ -1,0 +1,74 @@
+name: TriadGuard-CI Mimar Denetimi
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  security-events: write
+
+jobs:
+  triad-guardian:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu Kontrol Et
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Python Ortamını Hazırla
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Bağımlılıkları Yükle (Conductor için)
+        run: |
+          pip install pygithub pyyaml requests
+
+      - name: Structuralist - Statik Kod Kalite Taraması (SonarQube/SARIF)
+        uses: SonarSource/sonarcloud-github-action@v2.2.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: -Dsonar.qualitygate.wait=true
+        continue-on-error: true
+
+      - name: Sentinel - Güvenlik ve Sır Taraması (Trivy)
+        uses: aquasecurity/trivy-action@0.19.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+        continue-on-error: true
+
+      - name: Sentinel - CodeQL ile Derinlemesine Analiz
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python, javascript, csharp
+        continue-on-error: true
+
+      - name: Orkestratörü Çalıştır (Conductor Karar Verecek)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          python scripts/conductor.py
+
+      - name: PR Durumunu Güncelle (Başarılı/Red)
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const conclusion = '${{ job.status }}';
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🏛️ **TriadGuard Mimar Raporu:**\n- Durum: ${conclusion === 'success' ? '✅ Tüm kontroller geçti, yapı sağlam.' : '⚠️ Lütfen yukarıdaki uyarıları inceleyin.'}`
+            });
