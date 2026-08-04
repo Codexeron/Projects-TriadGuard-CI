@@ -11,73 +11,87 @@ permissions:
   security-events: write
 
 jobs:
-  # 1. Structuralist - Kod Kalitesi (SonarCloud)
-  structuralist:
+  triad-orchestrator:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@v2.2.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-  # 2. Sentinel - Güvenlik (Trivy)
-  sentinel-trivy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Create reports directory
+        run: mkdir -p reports
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Conductor dependencies
+        run: pip install pygithub pyyaml requests
+
+      # ===== SENTINEL - Trivy (Güvenlik Taraması) =====
       - name: Trivy Filesystem Scan
-        uses: aquasecurity/trivy-action@0.19.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: reports/trivy-results.sarif
         continue-on-error: true
-      - name: Upload Trivy SARIF
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-sarif
-          path: trivy-results.sarif
 
-  # 3. Sentinel - Derin Analiz (CodeQL)
-  sentinel-codeql:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Upload Trivy SARIF to GitHub
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/trivy-results.sarif
+
+      # ===== SENTINEL - CodeQL (Derinlemesine Analiz) =====
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: python, javascript, csharp
+        continue-on-error: true
+
+      - name: Autobuild (CodeQL)
+        uses: github/codeql-action/autobuild@v3
+        continue-on-error: true
+
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:all"
+          output: reports/codeql-results.sarif
         continue-on-error: true
-      - name: Upload CodeQL SARIF
-        uses: actions/upload-artifact@v4
-        with:
-          name: codeql-sarif
-          path: results/*.sarif
 
-  # 4. Conductor - Karar Motoru (Tüm raporları toplar)
-  conductor:
-    needs: [structuralist, sentinel-trivy, sentinel-codeql]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install Dependencies
-        run: pip install pygithub pyyaml requests
-      - name: Download All SARIF Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./reports
-      - name: Run Conductor
+      # ===== STRUCTURALIST - SonarCloud (Opsiyonel, Secret yoksa pasif) =====
+      # - name: SonarCloud Scan
+      #   uses: SonarSource/sonarcloud-github-action@v2.2.0
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      #   with:
+      #     args: -Dsonar.qualitygate.wait=false
+      #   continue-on-error: true
+
+      # ===== CONDUCTOR - Karar Motoru =====
+      - name: Run Conductor (Decision Engine)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO_NAME: ${{ github.repository }}
-        run: python scripts/conductor.py
+        run: |
+          python scripts/conductor.py
+
+      - name: Final PR Status Update
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const conclusion = '${{ job.status }}';
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🏛️ **TriadGuard Final Status:**\n- Workflow Result: ${conclusion === 'success' ? '✅ Orchestration completed.' : '⚠️ Please check the logs for errors.'}`
+            });
