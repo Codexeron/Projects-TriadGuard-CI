@@ -1,5 +1,7 @@
-mimar_kurallari:
-  max_complexity: 10
-  ignore_security_rules:
-    - "CVE-2023-1234" # Bilinen bir false-positive ise burada pas geç
-  strict_mode: true # Kritik bulguda PR'ı otomatik kapat
+architect_rules:
+  max_complexity: 10          # Maximum cyclomatic complexity per method
+  strict_mode: true           # Automatically close the PR on critical findings
+  ignore_security_rules: []   # Add CVE numbers here if they are false-positives
+  excluded_paths:
+    - "**/*.generated.cs"
+    - "**/*.min.js"
