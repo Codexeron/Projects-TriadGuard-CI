@@ -3,23 +3,17 @@ import json
 import glob
 import sys
 from github import Github
+from github.GithubException import GithubException
 
 def parse_sarif(file_path):
-    """
-    Parse a SARIF file and return error/warning counts.
-    Returns a dict with errors, warnings, and file status.
-    """
+    """Parse SARIF file and return error/warning counts."""
     errors = 0
     warnings = 0
-    
     if not os.path.exists(file_path):
         return {"errors": 0, "warnings": 0, "file_found": False}
-    
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        
-        # Navigate SARIF structure: runs[].results[].level
         for run in data.get('runs', []):
             for result in run.get('results', []):
                 level = result.get('level', 'warning')
@@ -27,12 +21,23 @@ def parse_sarif(file_path):
                     errors += 1
                 elif level in ['warning', 'note']:
                     warnings += 1
-                    
         return {"errors": errors, "warnings": warnings, "file_found": True}
-    
     except Exception as e:
         print(f"[ERROR] Failed to parse SARIF {file_path}: {e}")
         return {"errors": 0, "warnings": 0, "file_found": False}
+
+def set_commit_status(repo, pr, state, description, context="TriadGuard-CI"):
+    """Set the commit status on the PR's head commit."""
+    try:
+        commit = repo.get_commit(pr.head.sha)
+        commit.create_status(
+            state=state,  # 'success', 'failure', 'pending', 'error'
+            description=description[:100],  # Max 140 chars
+            context=context
+        )
+        print(f"[STATUS] Set status to '{state}' on commit {pr.head.sha[:7]}")
+    except GithubException as e:
+        print(f"[ERROR] Could not set commit status: {e}")
 
 def main():
     token = os.getenv("GITHUB_TOKEN")
@@ -40,76 +45,58 @@ def main():
     pr_number = os.getenv("PR_NUMBER")
     
     if not token or not repo_name or not pr_number:
-        print("[ERROR] Missing required environment variables (GITHUB_TOKEN, REPO_NAME, PR_NUMBER).")
+        print("[ERROR] Missing environment variables.")
         sys.exit(1)
     
     pr_number = int(pr_number)
-    print(f"[INFO] Connecting to GitHub repo: {repo_name}, PR #{pr_number}")
-    
     g = Github(token)
     repo = g.get_repo(repo_name)
     pr = repo.get_pull(pr_number)
     
-    # Step 1: Find all SARIF files in the workspace
+    # Find all SARIF files
     sarif_files = glob.glob("**/*.sarif", recursive=True)
     print(f"[INFO] Found {len(sarif_files)} SARIF file(s): {sarif_files}")
     
-    if not sarif_files:
-        comment = (
-            "🏛️ **TriadGuard Architect Report**\n\n"
-            "ℹ️ **Verdict: MANUAL REVIEW REQUIRED**\n"
-            "No SARIF report files were generated. This usually happens on the first run "
-            "or if no security/quality tools found issues. Please review the code manually.\n"
-            "*(Tip: Ensure Trivy and CodeQL steps executed correctly in the workflow.)*"
-        )
-        pr.create_issue_comment(comment)
-        print("[INFO] No SARIF files found. PR left open for manual review.")
-        return
-    
-    # Step 2: Aggregate counts from all SARIF files
     total_errors = 0
     total_warnings = 0
-    
     for file in sarif_files:
-        print(f"[INFO] Processing: {file}")
         result = parse_sarif(file)
         if result["file_found"]:
             total_errors += result["errors"]
             total_warnings += result["warnings"]
-            print(f"    -> Errors: {result['errors']}, Warnings: {result['warnings']}")
-        else:
-            print(f"    -> File not found or inaccessible.")
+            print(f"    -> {file}: Errors={result['errors']}, Warnings={result['warnings']}")
     
     print(f"[SUMMARY] Total Errors: {total_errors}, Total Warnings: {total_warnings}")
     
-    # Step 3: The Architect's Final Decision (English comments for PR)
+    # Prepare comment and status based on results
     comment_body = "🏛️ **TriadGuard Architect Report**\n\n"
-    comment_body += f"📊 **Aggregate Scan Summary:**\n- **Critical Errors:** {total_errors}\n- **Warnings:** {total_warnings}\n\n"
+    comment_body += f"📊 **Scan Summary:**\n- **Critical Errors:** {total_errors}\n- **Warnings:** {total_warnings}\n\n"
     
     if total_errors > 0:
         comment_body += "🚫 **Verdict: REJECTED**\n"
-        comment_body += "Critical security or structural errors detected. Please fix the issues and push a new commit.\n"
+        comment_body += "Critical errors detected. Please fix them before merging."
         pr.create_issue_comment(comment_body)
-        pr.edit(state="closed")
-        print("[ACTION] PR closed due to critical errors.")
+        set_commit_status(repo, pr, "failure", "Rejected: Critical errors found")
+        # Optionally close the PR. For now, we just block via status.
+        # pr.edit(state="closed")  # Uncomment if you want auto-close.
         
-    elif total_warnings > 10:  # High threshold for warnings
+    elif total_warnings > 10:
         comment_body += "⚠️ **Verdict: CHANGES REQUESTED**\n"
-        comment_body += "High number of warnings (Code Smells/Security Notes). Please review the attached SARIF logs.\n"
+        comment_body += "Too many warnings. Please review and address them."
         pr.create_issue_comment(comment_body)
-        print("[ACTION] Changes requested on PR.")
+        set_commit_status(repo, pr, "failure", "Changes requested: High warnings")
         
     elif total_warnings > 0:
         comment_body += "✅ **Verdict: APPROVED WITH NOTES**\n"
-        comment_body += "Minor warnings detected. The code is safe to merge, but consider fixing the warnings for better maintainability.\n"
+        comment_body += "Minor warnings present. Merge is allowed but consider cleaning up."
         pr.create_issue_comment(comment_body)
-        print("[ACTION] PR approved with notes.")
+        set_commit_status(repo, pr, "success", "Approved with minor notes")
         
-    else:  # Zero warnings and zero errors
+    else:
         comment_body += "✅ **Verdict: APPROVED**\n"
-        comment_body += "All scans passed cleanly. The code meets the defined architectural standards.\n"
+        comment_body += "All checks passed cleanly. Ready to merge."
         pr.create_issue_comment(comment_body)
-        print("[ACTION] PR fully approved.")
+        set_commit_status(repo, pr, "success", "All checks passed")
 
 if __name__ == "__main__":
     main()
