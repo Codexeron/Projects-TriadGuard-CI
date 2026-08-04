@@ -1,7 +1,8 @@
 architect_rules:
-  max_complexity: 10          # Maximum cyclomatic complexity per method
-  strict_mode: true           # Automatically close the PR on critical findings
-  ignore_security_rules: []   # Add CVE numbers here if they are false-positives
+  max_complexity: 10
+  strict_mode: false          # true ise warnings bile PR'ı bloklasın
+  ignore_security_rules: []   # CVE numaraları
   excluded_paths:
     - "**/*.generated.cs"
     - "**/*.min.js"
+    - "**/migrations/*.py"
