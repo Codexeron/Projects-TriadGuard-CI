@@ -1,73 +1,29 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/Architecture-TriadGuard--CI-blueviolet?style=for-the-badge&logo=githubactions" alt="Architecture">
-  <img src="https://img.shields.io/badge/Status-Stable-success?style=for-the-badge" alt="Status">
-  <img src="https://img.shields.io/badge/API_Dependency-None-red?style=for-the-badge" alt="API Dependency">
-  <img src="https://img.shields.io/badge/PR_Review-Autonomous-181717?style=for-the-badge&logo=github" alt="PR Review">
-</p>
-
-
 # 🏛️ TriadGuard-CI
 
+TriadGuard-CI is an autonomous GitHub workflow that scans your code for security vulnerabilities, code smells, and structural issues – without any external API calls. It runs entirely on free, open-source tools (Trivy, CodeQL, SonarQube optional).
 
+## 🚀 Quick Start
 
-> **The Architect's Compass for Your Pull Requests**
+1. Clone this repository.
+2. Copy the `.github/workflows/triadguard.yml` and `scripts/conductor.py` into your own project.
+3. (Optional) Adjust `config/triadguard.yml` to set your own rules.
+4. Push to your repository – the workflow will trigger automatically on every push to `main` and on pull requests.
 
-TriadGuard-CI is an autonomous Pull Request governance framework that combines static analysis, security scanning, and decision automation into a single GitHub Actions workflow.
+## 📦 What It Does
 
+- **Trivy** – scans for security vulnerabilities (CVEs, secrets, misconfigurations).
+- **CodeQL** – performs deep code analysis for potential bugs and security issues.
+- **Conductor (Python)** – aggregates results, posts a summary comment on PRs, and sets commit status (success/failure).
 
-It is designed to review every Pull Request automatically using three specialized agents:
+## ⚙️ Configuration
 
+Edit `config/triadguard.yml`:
 
-- 🏗️ **The Structuralist** — Code quality and maintainability analysis.
-- 🛡️ **The Sentinel** — Security, dependency, and secret scanning.
-- ⚖️ **The Conductor** — Aggregates results and publishes a final Pull Request verdict.
-
-
-Unlike AI-powered review systems, TriadGuard-CI relies entirely on free and open-source tooling and requires **no external AI APIs**.
-
-
-
-
-
-
----
-
-
-## Features
-
-
-- Automated Pull Request reviews
-- Static code quality analysis
-- Security vulnerability scanning
-- Secret detection
-- Dependency inspection
-- Final architectural verdict
-- GitHub-native workflow
-- No external AI services required
-
-
----
-
-
-## Architecture
-
-
-| Agent | Responsibility | Tools |
-|-------|----------------|------|
-| 🏗️ Structuralist | Code quality and maintainability | SonarQube, ESLint, PMD, dotnet format |
-| 🛡️ Sentinel | Security and dependency analysis | CodeQL, Trivy, Gitleaks, Bandit |
-| ⚖️ Conductor | Decision engine | Python + PyGithub |
-
-
----
-
-
-
-
-## Quick Start
-
-
-
-```bash
-git clone https://github.com/Codexeron/Projects-TriadGuard-CI.git
-cd Projects-TriadGuard-CI
+```yaml
+architect_rules:
+  max_complexity: 10          # not yet enforced, reserved for future
+  strict_mode: false          # if true, even warnings block the PR
+  ignore_security_rules: []   # add CVE IDs to ignore
+  excluded_paths:             # files/folders to skip scanning
+    - "**/*.generated.cs"
+    - "**/*.min.js"
